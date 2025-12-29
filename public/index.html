@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YT stuff</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="blob-container">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+  </div>
+
+  <main class="glass-container">
+    <header>
+      <div class="logo">
+        <h1>Streamer</h1>
+      </div>
+      <p class="subtitle">Dont arrest me plss</p>
+    </header>
+
+    <section class="download-section">
+      <form id="download-form">
+        <div class="input-group">
+          <label for="url">Enter YouTube Link</label>
+          <div class="input-wrapper">
+            <input type="text" id="url" name="url" placeholder="https://www.youtube.com/watch?v=..." required>
+            <span class="focus-border"></span>
+          </div>
+        </div>
+
+        <div id="preview-container" class="preview-card" style="display: none;">
+          <div class="preview-image">
+            <img id="video-thumbnail" src="" alt="Thumbnail">
+          </div>
+          <div class="preview-info">
+            <h3 id="video-title">Video Title</h3>
+            <p id="video-uploader">Uploader</p>
+          </div>
+        </div>
+
+        <div id="progress-container" class="progress-wrapper" style="display: none;">
+          <div class="progress-bar-bg">
+            <div id="progress-bar-fill" class="progress-bar-fill"></div>
+          </div>
+          <div class="progress-stats">
+            <span id="progress-text">0%</span>
+            <span id="status-text">Preparing...</span>
+          </div>
+        </div>
+
+        <button type="submit" id="download-btn">
+          <span class="btn-content">
+            <span class="text">Find Video</span>
+            <span class="arrow">→</span>
+          </span>
+          <div class="btn-glow"></div>
+        </button>
+      </form>
+    </section>
+  </main>
+
+
+  <script src="script.js"></script>
+</body>
+
+</html>
