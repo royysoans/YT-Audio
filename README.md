@@ -1,4 +1,4 @@
-# YT-Audio (Zine DIY Edition)
+# YT-Audio 
 
 Extract high-quality audio (MP3, M4A, FLAC, WAV, OGG) from YouTube videos, multi-link batches, and full playlists with real-time progress, audio trimming, and embedded album cover art.
 
