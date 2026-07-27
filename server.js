@@ -2,6 +2,7 @@ const express = require("express");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const app = express();
 
 app.use(express.json());
@@ -57,7 +58,7 @@ function fetchSingleUrlInfo(targetUrl) {
             "--no-warnings",
             "--force-ipv4",
             targetUrl
-        ]);
+        ], { windowsHide: true });
 
         let output = "";
         infoProcess.stdout.on("data", (data) => { output += data.toString(); });
@@ -71,7 +72,7 @@ function fetchSingleUrlInfo(targetUrl) {
                 if (data._type === "playlist" && data.entries) {
                     videos = data.entries.map(entry => ({
                         title: entry.title || "Unknown Title",
-                        thumbnail: entry.thumbnails && entry.thumbnails.length ? entry.thumbnails[entry.thumbnails.length - 1].url : entry.thumbnail || `https://img.youtube.com/vi/${entry.id}/hqdefault.jpg`,
+                        thumbnail: `https://img.youtube.com/vi/${entry.id}/hqdefault.jpg`,
                         uploader: entry.uploader || entry.channel || data.uploader || data.channel || "Unknown Artist",
                         id: entry.id,
                         url: entry.url || `https://www.youtube.com/watch?v=${entry.id}`
@@ -79,7 +80,7 @@ function fetchSingleUrlInfo(targetUrl) {
                 } else {
                     videos = [{
                         title: data.title || "Unknown Title",
-                        thumbnail: data.thumbnail || (data.thumbnails && data.thumbnails.length ? data.thumbnails[data.thumbnails.length - 1].url : "") || `https://img.youtube.com/vi/${data.id}/hqdefault.jpg`,
+                        thumbnail: `https://img.youtube.com/vi/${data.id}/hqdefault.jpg`,
                         uploader: data.uploader || data.channel || "Unknown Artist",
                         id: data.id,
                         url: data.webpage_url || targetUrl
@@ -153,7 +154,7 @@ app.get("/download", async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${safeTitle.replace(/[^\x20-\x7E]/g, '') || 'audio'}.${format}"; filename*=UTF-8''${encodedFilename}`);
     res.setHeader("Content-Type", mimeType);
 
-    // Fetch cover image with fallback candidates
+    // Cross-platform temporary directory (os.tmpdir() works on Windows & macOS)
     let thumbPath = "";
     let hasThumbnail = false;
     if (format === "mp3" || format === "m4a") {
@@ -165,7 +166,7 @@ app.get("/download", async (req, res) => {
             videoId ? `https://img.youtube.com/vi/${videoId}/0.jpg` : null
         ];
 
-        thumbPath = path.join("/tmp", `thumb_${clientId || Date.now()}_${Date.now()}.jpg`);
+        thumbPath = path.join(os.tmpdir(), `thumb_${clientId || Date.now()}_${Date.now()}.jpg`);
         hasThumbnail = await downloadThumbnail(candidates, thumbPath);
     }
 
@@ -177,7 +178,7 @@ app.get("/download", async (req, res) => {
         "-N", "4",
         "-o", "-",
         url
-    ]);
+    ], { windowsHide: true });
 
     let ffmpegArgs = ["-i", "pipe:0"];
 
@@ -235,7 +236,7 @@ app.get("/download", async (req, res) => {
     }
     ffmpegArgs.push("pipe:1");
 
-    const ff = spawn("ffmpeg", ffmpegArgs);
+    const ff = spawn("ffmpeg", ffmpegArgs, { windowsHide: true });
 
     yt.stdout.pipe(ff.stdin);
     ff.stdout.pipe(res);
