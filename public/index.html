@@ -4,76 +4,120 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YT Audio Streamer</title>
+  <title>YT-AUDIO ZINE • ISSUE #01</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,700&family=Syne:wght@700;800&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
-  <div class="blob-container">
-    <div class="blob blob-1"></div>
-    <div class="blob blob-2"></div>
-  </div>
+  <!-- Paper Texture Overlay -->
+  <div class="paper-texture"></div>
 
-  <main class="glass-container">
-    <header>
-      <div class="logo">
-        <h1>Streamer</h1>
-      </div>
-      <p class="subtitle">Extract high quality MP3 audio instantly</p>
+  <main class="zine-card">
+    <!-- Top Tape Strip -->
+    <div class="tape-strip top-tape"></div>
+
+    <header class="zine-header">
+      <div class="issue-tag">VOL. 01 // DIY AUDIO RIPPER</div>
+      <h1 class="zine-title">YT-AUDIO ZINE</h1>
+      <p class="zine-subtitle">⚡ RIP SOUNDS FROM VIDEOS & PLAYLISTS ⚡</p>
     </header>
 
-    <section class="download-section">
+    <section class="zine-body">
+      <!-- Error Toast -->
       <div id="error-banner" class="error-banner" style="display: none;">
-        <span class="error-icon">⚠️</span>
+        <span class="error-icon">💥</span>
         <span id="error-message" class="error-message"></span>
       </div>
 
       <form id="download-form">
-        <div class="input-group">
-          <label for="url">Enter YouTube Link</label>
-          <div class="input-wrapper">
-            <input type="url" id="url" name="url" placeholder="https://www.youtube.com/watch?v=..." required autocomplete="off">
-            <span class="focus-border"></span>
-          </div>
+        <!-- Main Link Input -->
+        <div class="input-card">
+          <label for="url" class="zine-label">► DROP LINKS HERE (SINGLE / PLAYLIST / MULTI-LINE)</label>
+          <textarea id="url" name="url" placeholder="https://youtube.com/watch?v=...&#10;paste multiple links here..." rows="3" required autocomplete="off"></textarea>
         </div>
 
-        <div id="preview-container" class="preview-card" style="display: none;">
-          <div class="preview-image">
-            <img id="video-thumbnail" src="" alt="Thumbnail">
+        <!-- Format Quick Selector Pills -->
+        <div class="quick-options">
+          <div class="pill-group" id="format-pills">
+            <button type="button" class="pill-btn active" data-value="mp3">MP3</button>
+            <button type="button" class="pill-btn" data-value="m4a">M4A</button>
+            <button type="button" class="pill-btn" data-value="flac">FLAC</button>
+            <button type="button" class="pill-btn" data-value="wav">WAV</button>
           </div>
-          <div class="preview-info">
-            <h3 id="video-title">Video Title</h3>
-            <p id="video-uploader">Uploader</p>
-          </div>
-        </div>
+          <select id="format" name="format" style="display: none;">
+            <option value="mp3" selected>MP3</option>
+            <option value="m4a">M4A</option>
+            <option value="flac">FLAC</option>
+            <option value="wav">WAV</option>
+            <option value="ogg">OGG</option>
+          </select>
 
-        <div id="progress-container" class="progress-wrapper" style="display: none;">
-          <div class="progress-bar-bg">
-            <div id="progress-bar-fill" class="progress-bar-fill"></div>
-          </div>
-          <div class="progress-stats">
-            <span id="progress-text">0%</span>
-            <span id="status-text">Preparing...</span>
-          </div>
-        </div>
-
-        <div class="button-group">
-          <button type="submit" id="download-btn">
-            <span class="btn-content">
-              <span class="text">Find Video</span>
-              <span class="arrow">→</span>
-            </span>
-            <div class="btn-glow"></div>
+          <button type="button" class="options-toggle-btn" id="advanced-toggle">
+            <span>SETTINGS</span>
+            <span class="toggle-arrow">▼</span>
           </button>
-          <button type="button" id="reset-btn" class="reset-btn" style="display: none;">
-            Reset
+        </div>
+
+        <!-- Collapsible Settings Panel -->
+        <div class="advanced-panel" id="advanced-options" style="display: none;">
+          <div class="settings-grid">
+            <div class="setting-item">
+              <label for="quality">AUDIO BITRATE</label>
+              <select id="quality" name="quality">
+                <option value="320k">320 kbps (BEST)</option>
+                <option value="256k">256 kbps</option>
+                <option value="192k" selected>192 kbps (STD)</option>
+                <option value="128k">128 kbps (LOW)</option>
+              </select>
+            </div>
+
+            <div class="setting-item">
+              <label for="start-time">TRIM START</label>
+              <input type="text" id="start-time" name="start-time" placeholder="00:00:00">
+            </div>
+
+            <div class="setting-item">
+              <label for="end-time">TRIM END</label>
+              <input type="text" id="end-time" name="end-time" placeholder="00:00:00">
+            </div>
+          </div>
+
+          <div class="checkbox-row">
+            <label class="clean-checkbox">
+              <input type="checkbox" id="normalize" name="normalize">
+              <span class="box"></span>
+              LOUDNORM (AUTO GAIN)
+            </label>
+          </div>
+        </div>
+
+        <!-- Playlist Queue -->
+        <div id="playlist-container" class="playlist-section" style="display: none;">
+          <div class="playlist-header">
+            <span>TRACKLIST QUEUE [<span id="queue-count">0</span>]</span>
+          </div>
+          <div class="playlist-list" id="playlist-items">
+            <!-- Items injected by JS -->
+          </div>
+        </div>
+
+        <!-- Action Bar -->
+        <div class="action-bar">
+          <button type="submit" id="download-btn" class="primary-btn">
+            <span id="btn-text">RIP AUDIO ►</span>
+          </button>
+          <button type="button" id="reset-btn" class="secondary-btn" style="display: none;">
+            CLEAR ✖
           </button>
         </div>
       </form>
     </section>
+
+    <!-- Bottom Tape Strip -->
+    <div class="tape-strip bottom-tape"></div>
   </main>
 
   <script src="script.js"></script>
