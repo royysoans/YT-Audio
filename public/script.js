@@ -2,10 +2,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('download-form');
     const urlInput = document.getElementById('url');
     const button = document.getElementById('download-btn');
+    const resetBtn = document.getElementById('reset-btn');
     const btnText = button.querySelector('.text');
     const btnArrow = button.querySelector('.arrow');
 
-    // UI Elements
     const previewContainer = document.getElementById('preview-container');
     const videoThumbnail = document.getElementById('video-thumbnail');
     const videoTitle = document.getElementById('video-title');
@@ -16,65 +16,90 @@ document.addEventListener('DOMContentLoaded', () => {
     const progressText = document.getElementById('progress-text');
     const statusText = document.getElementById('status-text');
 
+    const errorBanner = document.getElementById('error-banner');
+    const errorMessage = document.getElementById('error-message');
+
     let currentVideoData = null;
     let eventSource = null;
-    let clientId = null;
+    const clientId = 'client_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
 
-    // Connect to SSE for progress
-    function setupSSE() {
-        if (eventSource) return;
-        eventSource = new EventSource('/api/progress');
-        eventSource.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.progress) {
-                updateProgress(data.progress, 'Downloading...');
-            }
-        };
-        // We'll get our client ID from the first message or just use timestamp
-        // Simplified: The server uses Date.now() but we don't know it.
-        // Let's modify server to send the client ID first.
+    function showError(msg) {
+        errorMessage.textContent = msg;
+        errorBanner.style.display = 'flex';
     }
 
-    // Since server doesn't send ID, let's just make the client generate it and send to server.
-    // OPTION 2: Server sends ID in a specific message.
-    // Let's adjust server.js quickly after this to handle a provided clientId.
-    clientId = Date.now();
+    function hideError() {
+        errorBanner.style.display = 'none';
+        errorMessage.textContent = '';
+    }
+
+    function validateYouTubeUrl(url) {
+        const pattern = /^(https?:\/\/)?(www\.|m\.|music\.)?(youtube\.com|youtu\.be)\/.+/i;
+        return pattern.test(url.trim());
+    }
 
     function updateProgress(percent, status) {
         progressContainer.style.display = 'block';
-        progressBarFill.style.width = `${percent}%`;
-        progressText.textContent = `${Math.round(percent)}%`;
+        const rounded = Math.min(100, Math.max(0, Math.round(percent)));
+        progressBarFill.style.width = `${rounded}%`;
+        progressText.textContent = `${rounded}%`;
         if (status) statusText.textContent = status;
 
-        if (percent >= 100) {
-            statusText.textContent = 'Complete!';
-            statusText.style.color = '#10b981'; // green
+        if (rounded >= 100) {
+            statusText.textContent = 'Download Complete!';
+            statusText.style.color = '#10b981';
             if (eventSource) {
                 eventSource.close();
                 eventSource = null;
             }
             setTimeout(() => {
-                resetUI();
-            }, 5000);
+                button.disabled = false;
+                btnText.textContent = 'Extract MP3 Again';
+                btnArrow.style.display = 'inline';
+            }, 1000);
         }
     }
 
     function resetUI() {
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
         button.disabled = false;
         btnText.textContent = 'Find Video';
         btnArrow.style.display = 'inline';
         progressContainer.style.display = 'none';
         progressBarFill.style.width = '0%';
+        progressText.textContent = '0%';
+        statusText.style.color = '';
         currentVideoData = null;
         previewContainer.style.display = 'none';
+        resetBtn.style.display = 'none';
         urlInput.value = '';
+        hideError();
     }
+
+    resetBtn.addEventListener('click', resetUI);
+
+    urlInput.addEventListener('input', () => {
+        hideError();
+        if (currentVideoData) {
+            resetUI();
+        }
+    });
 
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        hideError();
+
+        const inputUrl = urlInput.value.trim();
+        if (!validateYouTubeUrl(inputUrl)) {
+            showError('Please enter a valid YouTube URL');
+            return;
+        }
 
         if (!currentVideoData) {
-            // STEP 1: FETCH INFO
+            // STEP 1: FETCH METADATA
             button.disabled = true;
             btnText.textContent = 'Searching...';
 
@@ -82,50 +107,68 @@ document.addEventListener('DOMContentLoaded', () => {
                 const response = await fetch('/api/info', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: urlInput.value })
+                    body: JSON.stringify({ url: inputUrl })
                 });
 
-                if (!response.ok) throw new Error('Video not found');
-
                 const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Video not found or unavailable');
+                }
+
                 currentVideoData = data;
 
-                // Update Preview
-                videoThumbnail.src = data.thumbnail;
+                videoThumbnail.src = data.thumbnail || '';
                 videoTitle.textContent = data.title;
                 videoUploader.textContent = data.uploader;
                 previewContainer.style.display = 'flex';
+                resetBtn.style.display = 'block';
 
                 btnText.textContent = 'Extract MP3';
                 button.disabled = false;
             } catch (err) {
-                alert(err.message);
+                showError(err.message || 'Failed to fetch video details');
                 resetUI();
             }
         } else {
-            // STEP 2: DOWNLOAD
+            // STEP 2: START SSE & TRIGGER DOWNLOAD
             button.disabled = true;
-            btnText.textContent = 'Extracting...';
+            btnText.textContent = 'Extracting Audio...';
+            btnArrow.style.display = 'none';
 
-            updateProgress(0, 'Initializing...');
+            updateProgress(0, 'Initializing audio stream...');
 
-            // Connect SSE
+            if (eventSource) {
+                eventSource.close();
+            }
+
             eventSource = new EventSource(`/api/progress?clientId=${clientId}`);
             eventSource.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                if (data.progress) {
-                    updateProgress(parseFloat(data.progress), 'Extracting Audio...');
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.progress !== undefined) {
+                        updateProgress(parseFloat(data.progress), 'Converting & Downloading...');
+                    }
+                } catch (err) {
+                    console.error('SSE parse error:', err);
                 }
             };
 
-            // Trigger download via hidden link to keep SSE alive
-            const downloadUrl = `/download?url=${encodeURIComponent(urlInput.value)}&title=${encodeURIComponent(currentVideoData.title)}&artist=${encodeURIComponent(currentVideoData.uploader)}&clientId=${clientId}`;
+            eventSource.onerror = () => {
+                // EventSource error reconnect handling
+            };
 
-            // Using window.location often works for attachments without killing the page
-            window.location.href = downloadUrl;
+            // Trigger file download through an invisible iframe to maintain the active SSE stream
+            const downloadUrl = `/download?url=${encodeURIComponent(inputUrl)}&title=${encodeURIComponent(currentVideoData.title)}&artist=${encodeURIComponent(currentVideoData.uploader)}&clientId=${clientId}`;
+
+            let downloadFrame = document.getElementById('hidden-download-frame');
+            if (!downloadFrame) {
+                downloadFrame = document.createElement('iframe');
+                downloadFrame.id = 'hidden-download-frame';
+                downloadFrame.style.display = 'none';
+                document.body.appendChild(downloadFrame);
+            }
+            downloadFrame.src = downloadUrl;
         }
     });
-
-    // Helper to send the "real" client ID that the server picked
-    // Actually, I'll update server.js to use the query param instead for mapping.
 });
