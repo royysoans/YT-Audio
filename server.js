@@ -250,7 +250,8 @@ app.get("/download", async (req, res) => {
         ffmpegArgs.push("-c:a", "libmp3lame", "-b:a", quality);
         if (hasThumbnail) {
             ffmpegArgs.push(
-                "-c:v", "copy",
+                "-c:v", "mjpeg",
+                "-disposition:v", "attached_pic",
                 "-id3v2_version", "3",
                 "-metadata:s:v", "title=Album cover",
                 "-metadata:s:v", "comment=Cover (front)"
@@ -285,6 +286,7 @@ app.get("/download", async (req, res) => {
     yt.stdout.on("error", (err) => { if (err.code !== "EPIPE") console.error("yt stdout error:", err); });
     ff.stdin.on("error", (err) => { if (err.code !== "EPIPE") console.error("ff stdin error:", err); });
     ff.stdout.on("error", (err) => { if (err.code !== "EPIPE") console.error("ff stdout error:", err); });
+    ff.stderr.on("data", (data) => { console.error("ffmpeg-err:", data.toString()); });
 
     yt.stderr.on("data", (data) => {
         const line = data.toString();
