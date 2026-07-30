@@ -7,21 +7,20 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install yt-dlp with full solver dependencies
+# Install yt-dlp with full solver dependencies (bgutil-ytdlp-pot-provider is a pip package)
 RUN pip3 install --no-cache-dir -U --break-system-packages \
     "yt-dlp[default]" \
     yt-dlp-ejs \
     yt-dlp-get-pot \
+    bgutil-ytdlp-pot-provider \
     || pip3 install --no-cache-dir -U \
     "yt-dlp[default]" \
     yt-dlp-ejs \
-    yt-dlp-get-pot
+    yt-dlp-get-pot \
+    bgutil-ytdlp-pot-provider
 
 # Verify Node.js is in PATH for yt-dlp JS runtime solver
 RUN node --version && which node
-
-# Install bgutil POT provider (generates YouTube PO tokens for server environments)
-RUN npm install -g bgutil-ytdlp-pot-provider
 
 # Create app directory
 WORKDIR /app
