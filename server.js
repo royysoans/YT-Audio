@@ -10,9 +10,25 @@ let cookiesPath = "";
 if (process.env.YT_COOKIES) {
     try {
         const tempCookiesPath = path.join(os.tmpdir(), "cookies.txt");
-        fs.writeFileSync(tempCookiesPath, process.env.YT_COOKIES);
+        let cookiesContent = process.env.YT_COOKIES;
+        
+        // Render or copy-paste sometimes converts tabs to spaces, which breaks Netscape format.
+        // Convert any space-separated lines that have at least 7 fields back to tab-separated.
+        const lines = cookiesContent.split(/\r?\n/);
+        const sanitizedLines = lines.map(line => {
+            if (line.startsWith("#") || !line.trim()) return line;
+            const parts = line.split(/\s+/);
+            if (parts.length >= 7) {
+                const firstSix = parts.slice(0, 6);
+                const rest = parts.slice(6).join(" ");
+                return [...firstSix, rest].join("\t");
+            }
+            return line;
+        });
+
+        fs.writeFileSync(tempCookiesPath, sanitizedLines.join("\n"));
         cookiesPath = tempCookiesPath;
-        console.log("Cookies file written successfully at:", cookiesPath);
+        console.log("Cookies file written and sanitized successfully at:", cookiesPath);
     } catch (e) {
         console.error("Failed to write cookies file:", e);
     }
@@ -69,8 +85,7 @@ function fetchSingleUrlInfo(targetUrl) {
         const args = [
             "--flat-playlist",
             "--dump-single-json",
-            "--no-warnings",
-            "--force-ipv4"
+            "--no-warnings"
         ];
         if (cookiesPath) {
             args.push("--cookies", cookiesPath);
