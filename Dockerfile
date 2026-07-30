@@ -8,8 +8,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install latest yt-dlp via pip (since apt package is often outdated)
-RUN pip3 install --break-system-packages yt-dlp || pip3 install yt-dlp
+# Install latest yt-dlp via pip (always get latest version)
+RUN pip3 install --no-cache-dir -U --break-system-packages yt-dlp || pip3 install --no-cache-dir -U yt-dlp
 
 # Create app directory
 WORKDIR /app
