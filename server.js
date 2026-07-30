@@ -86,7 +86,7 @@ function fetchSingleUrlInfo(targetUrl) {
             "--flat-playlist",
             "--dump-single-json",
             "--ignore-no-formats-error",
-            "--extractor-args", "youtube:player_client=default,-tv_simply"
+            "--js-runtimes", "node"
         ];
         if (cookiesPath) {
             args.push("--cookies", cookiesPath);
@@ -211,7 +211,7 @@ app.get("/download", async (req, res) => {
         "--force-overwrites",
         "--no-mtime",
         "-N", "4",
-        "--extractor-args", "youtube:player_client=default,-tv_simply",
+        "--js-runtimes", "node",
         "-o", "-"
     ];
     if (cookiesPath) {
