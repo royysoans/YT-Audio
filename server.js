@@ -50,6 +50,9 @@ function buildYtdlpArgs(url) {
         "--force-overwrites",
         "--no-mtime",
         "--js-runtimes", "node",
+        "--sleep-requests", "1",   // 1s delay between requests to avoid 429
+        "--retries", "5",           // retry on transient errors
+        "--fragment-retries", "5",
         "-o", "-",
     ];
     if (cookiesPath) args.push("--cookies", cookiesPath);
