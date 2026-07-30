@@ -5,6 +5,20 @@ const path = require("path");
 const os = require("os");
 const app = express();
 
+// Set up cookies file for yt-dlp if provided via environment variable (useful for cloud deployments like Render)
+let cookiesPath = "";
+if (process.env.YT_COOKIES) {
+    try {
+        const tempCookiesPath = path.join(os.tmpdir(), "cookies.txt");
+        fs.writeFileSync(tempCookiesPath, process.env.YT_COOKIES);
+        cookiesPath = tempCookiesPath;
+        console.log("Cookies file written successfully at:", cookiesPath);
+    } catch (e) {
+        console.error("Failed to write cookies file:", e);
+    }
+}
+
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static("public"));
@@ -52,13 +66,18 @@ function sendProgress(clientId, progress) {
 
 function fetchSingleUrlInfo(targetUrl) {
     return new Promise((resolve) => {
-        const infoProcess = spawn("yt-dlp", [
+        const args = [
             "--flat-playlist",
             "--dump-single-json",
             "--no-warnings",
-            "--force-ipv4",
-            targetUrl
-        ], { windowsHide: true });
+            "--force-ipv4"
+        ];
+        if (cookiesPath) {
+            args.push("--cookies", cookiesPath);
+        }
+        args.push(targetUrl);
+
+        const infoProcess = spawn("yt-dlp", args, { windowsHide: true });
 
         let output = "";
         infoProcess.stdout.on("data", (data) => { output += data.toString(); });
@@ -170,15 +189,20 @@ app.get("/download", async (req, res) => {
         hasThumbnail = await downloadThumbnail(candidates, thumbPath);
     }
 
-    const yt = spawn("yt-dlp", [
+    const ytArgs = [
         "-f", "bestaudio/best",
         "--no-playlist",
         "--force-overwrites",
         "--no-mtime",
         "-N", "4",
-        "-o", "-",
-        url
-    ], { windowsHide: true });
+        "-o", "-"
+    ];
+    if (cookiesPath) {
+        ytArgs.push("--cookies", cookiesPath);
+    }
+    ytArgs.push(url);
+
+    const yt = spawn("yt-dlp", ytArgs, { windowsHide: true });
 
     let ffmpegArgs = ["-i", "pipe:0"];
 
