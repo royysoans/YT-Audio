@@ -3,58 +3,65 @@ const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const app = express();
 
-// Set up cookies file for yt-dlp if provided via environment variable (useful for cloud deployments like Render)
+const app = express();
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static("public"));
+
+// ── Cookie Setup ──────────────────────────────────────────────────────────────
+// Write YT_COOKIES env var to a temp file on startup (for cloud deployments).
+// Render/browser copy-paste often converts cookie file tabs to spaces; we fix that.
 let cookiesPath = "";
 if (process.env.YT_COOKIES) {
     try {
-        const tempCookiesPath = path.join(os.tmpdir(), "cookies.txt");
-        let cookiesContent = process.env.YT_COOKIES;
-        
-        // Render or copy-paste sometimes converts tabs to spaces, which breaks Netscape format.
-        // Convert any space-separated lines that have at least 7 fields back to tab-separated.
-        const lines = cookiesContent.split(/\r?\n/);
-        const sanitizedLines = lines.map(line => {
+        const tempCookiesPath = path.join(os.tmpdir(), "yt_cookies.txt");
+        const rawLines = process.env.YT_COOKIES.split(/\r?\n/);
+        const fixed = rawLines.map(line => {
             if (line.startsWith("#") || !line.trim()) return line;
             const parts = line.split(/\s+/);
             if (parts.length >= 7) {
-                const firstSix = parts.slice(0, 6);
-                const rest = parts.slice(6).join(" ");
-                return [...firstSix, rest].join("\t");
+                return [...parts.slice(0, 6), parts.slice(6).join(" ")].join("\t");
             }
             return line;
         });
-
-        fs.writeFileSync(tempCookiesPath, sanitizedLines.join("\n"));
+        fs.writeFileSync(tempCookiesPath, fixed.join("\n"));
         cookiesPath = tempCookiesPath;
-        console.log("Cookies file written and sanitized successfully at:", cookiesPath);
+        console.log("Cookies written to:", cookiesPath);
     } catch (e) {
         console.error("Failed to write cookies file:", e);
     }
 }
 
-
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static("public"));
-
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function sanitizeFilename(name) {
-    return name
-        .replace(/[\/\\?%*:|"<>]/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
+    return name.replace(/[\/\\?%*:|"<>]/g, "").replace(/\s+/g, " ").trim();
 }
 
 function extractVideoId(url) {
-    const match = url.match(/(?:v=|\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/);
-    return match ? match[1] : null;
+    const m = url.match(/(?:v=|\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/);
+    return m ? m[1] : null;
 }
 
+function buildYtdlpArgs(url) {
+    const args = [
+        "-f", "bestaudio/best",
+        "--no-playlist",
+        "--force-overwrites",
+        "--no-mtime",
+        "--js-runtimes", "node",
+        "-o", "-",
+    ];
+    if (cookiesPath) args.push("--cookies", cookiesPath);
+    args.push(url);
+    return args;
+}
+
+// ── SSE Progress ──────────────────────────────────────────────────────────────
 const clients = new Map();
 
 app.get("/api/progress", (req, res) => {
-    const clientId = req.query.clientId;
+    const { clientId } = req.query;
     if (!clientId) return res.end();
 
     res.setHeader("Content-Type", "text/event-stream");
@@ -64,67 +71,54 @@ app.get("/api/progress", (req, res) => {
     res.flushHeaders();
 
     if (clients.has(clientId)) {
-        try { clients.get(clientId).end(); } catch (e) {}
+        try { clients.get(clientId).end(); } catch (_) {}
     }
     clients.set(clientId, res);
-
-    req.on("close", () => {
-        clients.delete(clientId);
-    });
+    req.on("close", () => clients.delete(clientId));
 });
 
 function sendProgress(clientId, progress) {
-    const clientRes = clients.get(String(clientId));
-    if (clientRes && !clientRes.writableEnded) {
-        clientRes.write(`data: ${JSON.stringify({ progress })}\n\n`);
-    }
+    const r = clients.get(String(clientId));
+    if (r && !r.writableEnded) r.write(`data: ${JSON.stringify({ progress })}\n\n`);
 }
 
+// ── Info Fetch ────────────────────────────────────────────────────────────────
 function fetchSingleUrlInfo(targetUrl) {
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
         const args = [
             "--flat-playlist",
             "--dump-single-json",
             "--ignore-no-formats-error",
-            "--js-runtimes", "node"
+            "--js-runtimes", "node",
         ];
-        if (cookiesPath) {
-            args.push("--cookies", cookiesPath);
-        }
+        if (cookiesPath) args.push("--cookies", cookiesPath);
         args.push(targetUrl);
 
-        const infoProcess = spawn("yt-dlp", args, { windowsHide: true });
-
-        let output = "";
-        infoProcess.stdout.on("data", (data) => { output += data.toString(); });
-        infoProcess.stderr.on("data", (data) => { console.error("yt-info-err:", data.toString()); });
-
-        infoProcess.on("close", (code) => {
+        const proc = spawn("yt-dlp", args, { windowsHide: true });
+        let out = "";
+        proc.stdout.on("data", d => { out += d.toString(); });
+        proc.stderr.on("data", d => { console.error("yt-info:", d.toString().trim()); });
+        proc.on("close", code => {
             if (code !== 0) return resolve([]);
             try {
-                const data = JSON.parse(output);
-                let videos = [];
+                const data = JSON.parse(out);
                 if (data._type === "playlist" && data.entries) {
-                    videos = data.entries.map(entry => ({
-                        title: entry.title || "Unknown Title",
-                        thumbnail: `https://img.youtube.com/vi/${entry.id}/hqdefault.jpg`,
-                        uploader: entry.uploader || entry.channel || data.uploader || data.channel || "Unknown Artist",
-                        id: entry.id,
-                        url: entry.url || `https://www.youtube.com/watch?v=${entry.id}`
-                    }));
-                } else {
-                    videos = [{
-                        title: data.title || "Unknown Title",
-                        thumbnail: `https://img.youtube.com/vi/${data.id}/hqdefault.jpg`,
-                        uploader: data.uploader || data.channel || "Unknown Artist",
-                        id: data.id,
-                        url: data.webpage_url || targetUrl
-                    }];
+                    return resolve(data.entries.map(e => ({
+                        title: e.title || "Unknown Title",
+                        thumbnail: `https://img.youtube.com/vi/${e.id}/hqdefault.jpg`,
+                        uploader: e.uploader || e.channel || data.uploader || data.channel || "Unknown Artist",
+                        id: e.id,
+                        url: e.url || `https://www.youtube.com/watch?v=${e.id}`,
+                    })));
                 }
-                resolve(videos);
-            } catch (e) {
-                resolve([]);
-            }
+                resolve([{
+                    title: data.title || "Unknown Title",
+                    thumbnail: `https://img.youtube.com/vi/${data.id}/hqdefault.jpg`,
+                    uploader: data.uploader || data.channel || "Unknown Artist",
+                    id: data.id,
+                    url: data.webpage_url || targetUrl,
+                }]);
+            } catch (_) { resolve([]); }
         });
     });
 }
@@ -133,147 +127,121 @@ app.post("/api/info", async (req, res) => {
     const input = req.body.url || req.body.urls;
     if (!input) return res.status(400).json({ error: "No URL provided" });
 
-    let urlList = [];
-    if (Array.isArray(input)) {
-        urlList = input;
-    } else {
+    let urlList = Array.isArray(input) ? input : (() => {
         const regex = /https?:\/\/(www\.|m\.|music\.)?(youtube\.com|youtu\.be)\/[^\s,]+/gi;
         const matches = String(input).match(regex);
-        urlList = matches ? Array.from(new Set(matches)) : [input.trim()];
-    }
+        return matches ? Array.from(new Set(matches)) : [String(input).trim()];
+    })();
 
-    if (urlList.length === 0) {
-        return res.status(400).json({ error: "No valid YouTube URLs found" });
-    }
+    if (!urlList.length) return res.status(400).json({ error: "No valid YouTube URLs found" });
 
-    const results = await Promise.all(urlList.map(url => fetchSingleUrlInfo(url)));
-    const allVideos = results.flat();
-
-    if (allVideos.length === 0) {
-        return res.status(500).json({ error: "Failed to fetch metadata. Please check your URLs." });
-    }
-
+    const allVideos = (await Promise.all(urlList.map(fetchSingleUrlInfo))).flat();
+    if (!allVideos.length) return res.status(500).json({ error: "Failed to fetch video info. Check your URL." });
     res.json({ videos: allVideos });
 });
 
+// ── Download ──────────────────────────────────────────────────────────────────
 app.get("/download", async (req, res) => {
-    let { url, title, artist, clientId, format = "mp3", quality = "192k", startTime, endTime, normalize } = req.query;
+    const { url, title, artist, clientId, format = "mp3", quality = "192k", startTime, endTime, normalize } = req.query;
     if (!url) return res.status(400).send("No URL provided");
 
     const safeTitle = sanitizeFilename(title || "audio");
     const encodedFilename = encodeURIComponent(`${safeTitle}.${format}`)
-        .replace(/['()]/g, escape)
-        .replace(/\*/g, "%2A");
+        .replace(/['()]/g, escape).replace(/\*/g, "%2A");
 
-    let mimeType = "audio/mpeg";
-    if (format === "m4a") mimeType = "audio/mp4";
-    if (format === "flac") mimeType = "audio/flac";
-    if (format === "wav") mimeType = "audio/wav";
-    if (format === "ogg") mimeType = "audio/ogg";
+    const mimeTypes = { mp3: "audio/mpeg", m4a: "audio/mp4", flac: "audio/flac", wav: "audio/wav", ogg: "audio/ogg" };
 
-    res.setHeader("Content-Disposition", `attachment; filename="${safeTitle.replace(/[^\x20-\x7E]/g, '') || 'audio'}.${format}"; filename*=UTF-8''${encodedFilename}`);
-    res.setHeader("Content-Type", mimeType);
+    // Spawn yt-dlp first and buffer a small amount of data to confirm it's working
+    // before committing to streaming headers. This prevents 0-byte files on failure.
+    const yt = spawn("yt-dlp", buildYtdlpArgs(url), { windowsHide: true });
 
-    const ytArgs = [
-        "-f", "bestaudio/best",
-        "--no-playlist",
-        "--force-overwrites",
-        "--no-mtime",
-        "-N", "4",
-        "--js-runtimes", "node",
-        "-o", "-"
-    ];
-    if (cookiesPath) {
-        ytArgs.push("--cookies", cookiesPath);
-    }
-    ytArgs.push(url);
+    let headersSent = false;
+    let ytFailed = false;
+    const ytBuffer = [];
 
-    const yt = spawn("yt-dlp", ytArgs, { windowsHide: true });
-
-    let ffmpegArgs = [];
-
-    if (startTime) {
-        ffmpegArgs.push("-ss", startTime);
-    }
-    if (endTime) {
-        ffmpegArgs.push("-to", endTime);
-    }
-
-    ffmpegArgs.push("-i", "pipe:0");
-
-    // Audio Filters
-    let audioFilters = [];
-    if (normalize === "true") {
-        audioFilters.push("loudnorm");
-    }
-    if (audioFilters.length > 0) {
-        ffmpegArgs.push("-af", audioFilters.join(","));
-    }
-
-    // Codec & Quality
-    if (format === "mp3") {
-        ffmpegArgs.push("-c:a", "libmp3lame", "-b:a", quality);
-    } else if (format === "m4a") {
-        ffmpegArgs.push("-c:a", "aac", "-b:a", quality);
-    } else if (format === "flac") {
-        ffmpegArgs.push("-c:a", "flac");
-    } else if (format === "wav") {
-        ffmpegArgs.push("-c:a", "pcm_s16le");
-    } else if (format === "ogg") {
-        ffmpegArgs.push("-c:a", "libvorbis", "-q:a", "5");
-    }
-
-    ffmpegArgs.push("-metadata", `title=${title || ""}`);
-    ffmpegArgs.push("-metadata", `artist=${artist || ""}`);
-    ffmpegArgs.push("-f", format === "m4a" ? "mp4" : format);
-    if (format === "m4a") {
-        ffmpegArgs.push("-movflags", "frag_keyframe+empty_moov");
-    }
-    ffmpegArgs.push("pipe:1");
-
-    const ff = spawn("ffmpeg", ffmpegArgs, { windowsHide: true });
-
-    yt.stdout.pipe(ff.stdin);
-    ff.stdout.pipe(res);
-
-    yt.stdout.on("error", (err) => { if (err.code !== "EPIPE") console.error("yt stdout error:", err); });
-    ff.stdin.on("error", (err) => { if (err.code !== "EPIPE") console.error("ff stdin error:", err); });
-    ff.stdout.on("error", (err) => { if (err.code !== "EPIPE") console.error("ff stdout error:", err); });
-    ff.stderr.on("data", (data) => { console.error("ffmpeg-err:", data.toString()); });
-
-    yt.stderr.on("data", (data) => {
-        const line = data.toString();
-        console.error("yt-download-err:", line);
-        const match = line.match(/\[download\]\s+(\d+\.\d+)%/);
-        if (match && clientId) {
-            sendProgress(clientId, match[1]);
-        }
+    // Watch for yt-dlp errors before we commit to streaming
+    yt.stderr.on("data", d => {
+        const line = d.toString();
+        console.error("yt-dlp:", line.trim());
+        const m = line.match(/\[download\]\s+(\d+\.\d+)%/);
+        if (m && clientId) sendProgress(clientId, m[1]);
     });
 
-    let finished = false;
-    const cleanup = () => {
-        if (finished) return;
-        finished = true;
-        try { yt.kill("SIGTERM"); } catch (e) {}
-        try { ff.kill("SIGTERM"); } catch (e) {}
-    };
-
-    res.on("close", cleanup);
-    res.on("finish", cleanup);
-
-    yt.on("close", () => {
-        try { ff.stdin.end(); } catch (e) {}
+    yt.on("error", err => {
+        console.error("yt-dlp spawn error:", err);
+        ytFailed = true;
+        if (!headersSent) res.status(500).send("Failed to start yt-dlp.");
     });
 
-    ff.on("close", () => {
-        if (clientId) {
-            sendProgress(clientId, 100);
+    // Buffer first chunk to verify yt-dlp actually has data
+    yt.stdout.once("data", firstChunk => {
+        if (res.headersSent || ytFailed) return;
+        headersSent = true;
+
+        // Build ffmpeg args now that we know yt-dlp is actually producing data
+        const ffArgs = [];
+        if (startTime) ffArgs.push("-ss", startTime);
+        if (endTime) ffArgs.push("-to", endTime);
+        ffArgs.push("-i", "pipe:0");
+
+        if (normalize === "true") ffArgs.push("-af", "loudnorm");
+
+        if (format === "mp3") ffArgs.push("-c:a", "libmp3lame", "-b:a", quality);
+        else if (format === "m4a") ffArgs.push("-c:a", "aac", "-b:a", quality);
+        else if (format === "flac") ffArgs.push("-c:a", "flac");
+        else if (format === "wav") ffArgs.push("-c:a", "pcm_s16le");
+        else if (format === "ogg") ffArgs.push("-c:a", "libvorbis", "-q:a", "5");
+
+        if (title) ffArgs.push("-metadata", `title=${title}`);
+        if (artist) ffArgs.push("-metadata", `artist=${artist}`);
+        ffArgs.push("-f", format === "m4a" ? "mp4" : format);
+        if (format === "m4a") ffArgs.push("-movflags", "frag_keyframe+empty_moov");
+        ffArgs.push("pipe:1");
+
+        const ff = spawn("ffmpeg", ffArgs, { windowsHide: true });
+
+        ff.stderr.on("data", d => console.error("ffmpeg:", d.toString().trim()));
+        ff.on("error", err => {
+            console.error("ffmpeg spawn error:", err);
+            if (!res.headersSent) res.status(500).send("Failed to start ffmpeg.");
+        });
+
+        // Now we know we have data – set response headers and start streaming
+        res.setHeader("Content-Disposition", `attachment; filename="${safeTitle.replace(/[^\x20-\x7E]/g, "") || "audio"}.${format}"; filename*=UTF-8''${encodedFilename}`);
+        res.setHeader("Content-Type", mimeTypes[format] || "audio/mpeg");
+
+        // Write buffered first chunk, then pipe the rest
+        ff.stdin.write(firstChunk);
+        yt.stdout.pipe(ff.stdin);
+        ff.stdout.pipe(res);
+
+        yt.stdout.on("error", e => { if (e.code !== "EPIPE") console.error("yt stdout:", e); });
+        ff.stdin.on("error", e => { if (e.code !== "EPIPE") console.error("ff stdin:", e); });
+        ff.stdout.on("error", e => { if (e.code !== "EPIPE") console.error("ff stdout:", e); });
+
+        let done = false;
+        const cleanup = () => {
+            if (done) return;
+            done = true;
+            try { yt.kill("SIGTERM"); } catch (_) {}
+            try { ff.kill("SIGTERM"); } catch (_) {}
+        };
+        res.on("close", cleanup);
+        res.on("finish", cleanup);
+
+        yt.on("close", () => { try { ff.stdin.end(); } catch (_) {} });
+        ff.on("close", () => { if (clientId) sendProgress(clientId, 100); });
+    });
+
+    // If yt-dlp exits without producing any data at all
+    yt.on("close", code => {
+        if (!headersSent) {
+            console.error("yt-dlp exited with code", code, "and no data");
+            if (!res.headersSent) res.status(500).send("Could not download this video. It may be restricted or unavailable.");
         }
     });
 });
 
-
+// ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
