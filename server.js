@@ -9,30 +9,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static("public"));
 
-// ── Cookie Setup ──────────────────────────────────────────────────────────────
-// Write YT_COOKIES env var to a temp file on startup (for cloud deployments).
-// Render/browser copy-paste often converts cookie file tabs to spaces; we fix that.
-let cookiesPath = "";
-if (process.env.YT_COOKIES) {
-    try {
-        const tempCookiesPath = path.join(os.tmpdir(), "yt_cookies.txt");
-        const rawLines = process.env.YT_COOKIES.split(/\r?\n/);
-        const fixed = rawLines.map(line => {
-            if (line.startsWith("#") || !line.trim()) return line;
-            const parts = line.split(/\s+/);
-            if (parts.length >= 7) {
-                return [...parts.slice(0, 6), parts.slice(6).join(" ")].join("\t");
-            }
-            return line;
-        });
-        fs.writeFileSync(tempCookiesPath, fixed.join("\n"));
-        cookiesPath = tempCookiesPath;
-        console.log("Cookies written to:", cookiesPath);
-    } catch (e) {
-        console.error("Failed to write cookies file:", e);
-    }
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function sanitizeFilename(name) {
     return name.replace(/[\/\\?%*:|"<>]/g, "").replace(/\s+/g, " ").trim();
@@ -44,19 +20,14 @@ function extractVideoId(url) {
 }
 
 function buildYtdlpArgs(url) {
-    const args = [
+    return [
         "-f", "bestaudio/best",
         "--no-playlist",
         "--force-overwrites",
         "--no-mtime",
-        "--sleep-requests", "1",
-        "--retries", "5",
-        "--fragment-retries", "5",
         "-o", "-",
+        url
     ];
-    if (cookiesPath) args.push("--cookies", cookiesPath);
-    args.push(url);
-    return args;
 }
 
 // ── SSE Progress ──────────────────────────────────────────────────────────────
@@ -90,10 +61,9 @@ function fetchSingleUrlInfo(targetUrl) {
         const args = [
             "--flat-playlist",
             "--dump-single-json",
-            "--ignore-no-formats-error",
+            "--no-warnings",
+            targetUrl
         ];
-        if (cookiesPath) args.push("--cookies", cookiesPath);
-        args.push(targetUrl);
 
         const proc = spawn("yt-dlp", args, { windowsHide: true });
         let out = "";
@@ -152,18 +122,13 @@ app.get("/download", async (req, res) => {
 
     const mimeTypes = { mp3: "audio/mpeg", m4a: "audio/mp4", flac: "audio/flac", wav: "audio/wav", ogg: "audio/ogg" };
 
-    // Spawn yt-dlp first and buffer a small amount of data to confirm it's working
-    // before committing to streaming headers. This prevents 0-byte files on failure.
     const yt = spawn("yt-dlp", buildYtdlpArgs(url), { windowsHide: true });
 
     let headersSent = false;
     let ytFailed = false;
-    const ytBuffer = [];
 
-    // Watch for yt-dlp errors before we commit to streaming
     yt.stderr.on("data", d => {
         const line = d.toString();
-        console.error("yt-dlp:", line.trim());
         const m = line.match(/\[download\]\s+(\d+\.\d+)%/);
         if (m && clientId) sendProgress(clientId, m[1]);
     });
@@ -174,12 +139,10 @@ app.get("/download", async (req, res) => {
         if (!headersSent) res.status(500).send("Failed to start yt-dlp.");
     });
 
-    // Buffer first chunk to verify yt-dlp actually has data
     yt.stdout.once("data", firstChunk => {
         if (res.headersSent || ytFailed) return;
         headersSent = true;
 
-        // Build ffmpeg args now that we know yt-dlp is actually producing data
         const ffArgs = [];
         if (startTime) ffArgs.push("-ss", startTime);
         if (endTime) ffArgs.push("-to", endTime);
@@ -207,11 +170,9 @@ app.get("/download", async (req, res) => {
             if (!res.headersSent) res.status(500).send("Failed to start ffmpeg.");
         });
 
-        // Now we know we have data – set response headers and start streaming
         res.setHeader("Content-Disposition", `attachment; filename="${safeTitle.replace(/[^\x20-\x7E]/g, "") || "audio"}.${format}"; filename*=UTF-8''${encodedFilename}`);
         res.setHeader("Content-Type", mimeTypes[format] || "audio/mpeg");
 
-        // Write buffered first chunk, then pipe the rest
         ff.stdin.write(firstChunk);
         yt.stdout.pipe(ff.stdin);
         ff.stdout.pipe(res);
@@ -234,7 +195,6 @@ app.get("/download", async (req, res) => {
         ff.on("close", () => { if (clientId) sendProgress(clientId, 100); });
     });
 
-    // If yt-dlp exits without producing any data at all
     yt.on("close", code => {
         if (!headersSent) {
             console.error("yt-dlp exited with code", code, "and no data");
