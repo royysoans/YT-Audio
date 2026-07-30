@@ -49,9 +49,8 @@ function buildYtdlpArgs(url) {
         "--no-playlist",
         "--force-overwrites",
         "--no-mtime",
-        "--js-runtimes", "node",
-        "--sleep-requests", "1",   // 1s delay between requests to avoid 429
-        "--retries", "5",           // retry on transient errors
+        "--sleep-requests", "1",
+        "--retries", "5",
         "--fragment-retries", "5",
         "-o", "-",
     ];
@@ -92,7 +91,6 @@ function fetchSingleUrlInfo(targetUrl) {
             "--flat-playlist",
             "--dump-single-json",
             "--ignore-no-formats-error",
-            "--js-runtimes", "node",
         ];
         if (cookiesPath) args.push("--cookies", cookiesPath);
         args.push(targetUrl);

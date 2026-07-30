@@ -1,30 +1,47 @@
 FROM node:18-slim
 
-# Install system dependencies (ffmpeg, python3, pip, curl)
+# Install system dependencies (ffmpeg, python3, pip)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     python3 \
     python3-pip \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install latest yt-dlp + yt-dlp-ejs (required for YouTube JS signature/n-challenge solving)
-RUN pip3 install --no-cache-dir -U --break-system-packages "yt-dlp[default]" yt-dlp-ejs \
-    || pip3 install --no-cache-dir -U "yt-dlp[default]" yt-dlp-ejs
+# Install yt-dlp with full solver dependencies
+RUN pip3 install --no-cache-dir -U --break-system-packages \
+    "yt-dlp[default]" \
+    yt-dlp-ejs \
+    yt-dlp-get-pot \
+    || pip3 install --no-cache-dir -U \
+    "yt-dlp[default]" \
+    yt-dlp-ejs \
+    yt-dlp-get-pot
+
+# Verify Node.js is in PATH for yt-dlp JS runtime solver
+RUN node --version && which node
+
+# Install bgutil POT provider (generates YouTube PO tokens for server environments)
+RUN npm install -g bgutil-ytdlp-pot-provider
 
 # Create app directory
 WORKDIR /app
 
-# Copy package files and install dependencies
+# Copy package files and install app dependencies
 COPY package*.json ./
 RUN npm install --production
 
 # Copy application files
 COPY . .
 
-# Set environment variables (Hugging Face Spaces runs on port 7860 by default)
+# Create yt-dlp config pointing to the bgutil POT provider
+RUN mkdir -p /root/.config/yt-dlp && \
+    echo '--extractor-args "youtube:getpot_bgutil_baseurl=http://127.0.0.1:4416"' > /root/.config/yt-dlp/config
+
+# Expose port
 ENV PORT=7860
 EXPOSE 7860
 
-# Start server
-CMD ["node", "server.js"]
+# Use startup script to launch bgutil provider first, then the app server
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+CMD ["/start.sh"]
