@@ -156,23 +156,8 @@ app.post("/api/info", async (req, res) => {
     res.json({ videos: allVideos });
 });
 
-async function downloadThumbnail(urlsToTry, dest) {
-    for (const imageUrl of urlsToTry) {
-        if (!imageUrl) continue;
-        try {
-            const response = await fetch(imageUrl);
-            if (response.ok) {
-                const arrayBuffer = await response.arrayBuffer();
-                fs.writeFileSync(dest, Buffer.from(arrayBuffer));
-                return true;
-            }
-        } catch (e) {}
-    }
-    return false;
-}
-
 app.get("/download", async (req, res) => {
-    let { url, title, artist, clientId, format = "mp3", quality = "192k", startTime, endTime, normalize, thumbnail } = req.query;
+    let { url, title, artist, clientId, format = "mp3", quality = "192k", startTime, endTime, normalize } = req.query;
     if (!url) return res.status(400).send("No URL provided");
 
     const safeTitle = sanitizeFilename(title || "audio");
@@ -188,22 +173,6 @@ app.get("/download", async (req, res) => {
 
     res.setHeader("Content-Disposition", `attachment; filename="${safeTitle.replace(/[^\x20-\x7E]/g, '') || 'audio'}.${format}"; filename*=UTF-8''${encodedFilename}`);
     res.setHeader("Content-Type", mimeType);
-
-    // Cross-platform temporary directory (os.tmpdir() works on Windows & macOS)
-    let thumbPath = "";
-    let hasThumbnail = false;
-    if (format === "mp3" || format === "m4a") {
-        const videoId = extractVideoId(url);
-        const candidates = [
-            thumbnail,
-            videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : null,
-            videoId ? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg` : null,
-            videoId ? `https://img.youtube.com/vi/${videoId}/0.jpg` : null
-        ];
-
-        thumbPath = path.join(os.tmpdir(), `thumb_${clientId || Date.now()}_${Date.now()}.jpg`);
-        hasThumbnail = await downloadThumbnail(candidates, thumbPath);
-    }
 
     const ytArgs = [
         "-f", "bestaudio/best",
@@ -232,12 +201,6 @@ app.get("/download", async (req, res) => {
 
     ffmpegArgs.push("-i", "pipe:0");
 
-    if (hasThumbnail) {
-        ffmpegArgs.push("-i", thumbPath);
-        ffmpegArgs.push("-map", "0:a");
-        ffmpegArgs.push("-map", "1:v");
-    }
-
     // Audio Filters
     let audioFilters = [];
     if (normalize === "true") {
@@ -247,23 +210,11 @@ app.get("/download", async (req, res) => {
         ffmpegArgs.push("-af", audioFilters.join(","));
     }
 
-    // Codec, Quality & Cover Art ID3 Tagging
+    // Codec & Quality
     if (format === "mp3") {
         ffmpegArgs.push("-c:a", "libmp3lame", "-b:a", quality);
-        if (hasThumbnail) {
-            ffmpegArgs.push(
-                "-c:v", "mjpeg",
-                "-disposition:v", "attached_pic",
-                "-id3v2_version", "3",
-                "-metadata:s:v", "title=Album cover",
-                "-metadata:s:v", "comment=Cover (front)"
-            );
-        }
     } else if (format === "m4a") {
         ffmpegArgs.push("-c:a", "aac", "-b:a", quality);
-        if (hasThumbnail) {
-            ffmpegArgs.push("-c:v", "copy", "-disposition:v", "attached_pic");
-        }
     } else if (format === "flac") {
         ffmpegArgs.push("-c:a", "flac");
     } else if (format === "wav") {
@@ -305,9 +256,6 @@ app.get("/download", async (req, res) => {
         finished = true;
         try { yt.kill("SIGTERM"); } catch (e) {}
         try { ff.kill("SIGTERM"); } catch (e) {}
-        if (hasThumbnail && fs.existsSync(thumbPath)) {
-            try { fs.unlinkSync(thumbPath); } catch (e) {}
-        }
     };
 
     res.on("close", cleanup);
@@ -323,6 +271,7 @@ app.get("/download", async (req, res) => {
         }
     });
 });
+
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
