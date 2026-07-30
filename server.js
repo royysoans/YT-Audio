@@ -221,19 +221,21 @@ app.get("/download", async (req, res) => {
 
     const yt = spawn("yt-dlp", ytArgs, { windowsHide: true });
 
-    let ffmpegArgs = ["-i", "pipe:0"];
-
-    if (hasThumbnail) {
-        ffmpegArgs.push("-i", thumbPath);
-        ffmpegArgs.push("-map", "0:a");
-        ffmpegArgs.push("-map", "1:v");
-    }
+    let ffmpegArgs = [];
 
     if (startTime) {
         ffmpegArgs.push("-ss", startTime);
     }
     if (endTime) {
         ffmpegArgs.push("-to", endTime);
+    }
+
+    ffmpegArgs.push("-i", "pipe:0");
+
+    if (hasThumbnail) {
+        ffmpegArgs.push("-i", thumbPath);
+        ffmpegArgs.push("-map", "0:a");
+        ffmpegArgs.push("-map", "1:v");
     }
 
     // Audio Filters
@@ -290,6 +292,7 @@ app.get("/download", async (req, res) => {
 
     yt.stderr.on("data", (data) => {
         const line = data.toString();
+        console.error("yt-download-err:", line);
         const match = line.match(/\[download\]\s+(\d+\.\d+)%/);
         if (match && clientId) {
             sendProgress(clientId, match[1]);
